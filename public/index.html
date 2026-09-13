@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="color-scheme" content="dark light" />
+<title>中国象棋 · 联机对弈</title>
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+<div id="conn-status" class="conn-status hidden" role="status" aria-live="polite"></div>
+<div id="toast" class="toast-wrap" aria-live="polite"></div>
+
+<main class="app">
+
+  <!-- ================= 大厅 ================= -->
+  <section id="screen-lobby" class="screen active">
+    <header class="hero">
+      <h1>中国象棋</h1>
+      <p class="hero-sub">正常模式 · 揭棋 · 全乱揭棋 · 全明乱棋</p>
+    </header>
+
+    <div class="panel">
+      <label class="field">
+        <span>昵称</span>
+        <input id="nickname" maxlength="16" placeholder="输入昵称（最多 16 字）" autocomplete="off" spellcheck="false" />
+      </label>
+    </div>
+
+    <div class="panel">
+      <h2 class="panel-title">选择模式</h2>
+      <div id="mode-cards" class="mode-cards"></div>
+      <div class="row">
+        <button id="btn-create" class="btn primary">创建房间</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2 class="panel-title">加入房间</h2>
+      <div class="row">
+        <input id="join-code" class="code-input" maxlength="6" placeholder="6 位房号" autocomplete="off" spellcheck="false" />
+        <button id="btn-join" class="btn">加入</button>
+      </div>
+      <p class="hint">提示：链接带 <code>?room=XXXXXX</code> 可直接进房。</p>
+    </div>
+
+    <div class="panel">
+      <h2 class="panel-title">人机对战</h2>
+      <p class="hint">和电脑下棋，完全离线可用。支持全部四种模式。</p>
+      <div class="row">
+        <label class="field-inline">
+          <span>难度</span>
+          <select id="ai-level" class="ui-select">
+            <option value="easy">简单</option>
+            <option value="normal" selected>普通</option>
+            <option value="hard">困难</option>
+          </select>
+        </label>
+        <label class="field-inline">
+          <span>我方</span>
+          <select id="ai-side" class="ui-select">
+            <option value="r" selected>红方（先手）</option>
+            <option value="b">黑方（后手）</option>
+          </select>
+        </label>
+        <button id="btn-ai" class="btn primary">开始人机对战</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2 class="panel-title">本地双人（热座）</h2>
+      <p class="hint">同一台设备轮流走子，使用内置规则引擎，完全离线可用。</p>
+      <div class="row">
+        <button id="btn-local" class="btn">开始本地对局</button>
+        <button id="btn-rules" class="btn ghost">规则说明</button>
+      </div>
+    </div>
+
+    <p id="static-hint" class="hint hidden"></p>
+  </section>
+
+  <!-- ================= 房间 ================= -->
+  <section id="screen-room" class="screen">
+    <header class="topbar">
+      <button id="btn-leave-room" class="btn tiny ghost">← 返回大厅</button>
+      <span id="room-mode" class="tag"></span>
+    </header>
+
+    <div class="room-code-box">
+      <span class="room-code-label">房间号</span>
+      <strong id="room-code" class="room-code">------</strong>
+      <button id="btn-copy-code" class="btn tiny">复制</button>
+    </div>
+
+    <div class="seats">
+      <div id="seat-r" class="seat seat-r"></div>
+      <div id="seat-b" class="seat seat-b"></div>
+    </div>
+
+    <div class="row row-center">
+      <button id="btn-ready" class="btn primary">准备</button>
+      <button id="btn-start" class="btn hidden">开始对局</button>
+    </div>
+    <p id="room-status" class="room-status"></p>
+    <p id="room-spectators" class="hint"></p>
+
+    <div class="panel">
+      <h2 class="panel-title">聊天</h2>
+      <div class="chat-list"></div>
+      <form class="chat-form" data-chat="room">
+        <input class="chat-input" maxlength="200" placeholder="说点什么…" autocomplete="off" />
+        <button class="btn tiny" type="submit">发送</button>
+      </form>
+    </div>
+  </section>
+
+  <!-- ================= 棋盘 ================= -->
+  <section id="screen-game" class="screen">
+    <div class="game-top">
+      <button id="btn-back-room" class="btn tiny ghost">房间</button>
+      <div id="turn-indicator" class="turn-indicator">—</div>
+      <div id="check-badge" class="check-badge hidden">将 军 !</div>
+      <div class="game-top-right">
+        <span id="game-mode" class="tag"></span>
+        <span id="game-code" class="tag mono"></span>
+      </div>
+    </div>
+
+    <div class="game-body">
+      <div class="board-col">
+        <div class="board-host" id="board-host"></div>
+        <div id="result-bar" class="result-bar hidden">
+          <span id="result-text"></span>
+          <button id="btn-rematch" class="btn tiny primary">再来一局</button>
+        </div>
+      </div>
+
+      <aside class="side">
+        <div class="side-block">
+          <h3>着法记录</h3>
+          <ol id="history-list" class="history"></ol>
+        </div>
+        <div class="side-block">
+          <h3>聊天</h3>
+          <div class="chat-list"></div>
+          <form class="chat-form" data-chat="game">
+            <input class="chat-input" maxlength="200" placeholder="说点什么…" autocomplete="off" />
+            <button class="btn tiny" type="submit">发送</button>
+          </form>
+        </div>
+        <div class="side-actions">
+          <button id="btn-resign" class="btn danger tiny">认输</button>
+          <button id="btn-leave" class="btn ghost tiny">离开房间</button>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ================= 规则弹窗 ================= -->
+  <div id="rules-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="rules-title">
+    <div class="modal-card">
+      <header class="modal-head">
+        <h2 id="rules-title">玩法规则说明</h2>
+        <button id="btn-close-rules" class="btn tiny ghost" aria-label="关闭">✕</button>
+      </header>
+      <div class="modal-body">
+        <h3>1. 正常模式</h3>
+        <p>标准中国象棋。红先黑后；将/帅被将军必须应将；<b>无子可动（困毙）判负</b>；将帅不可照面（飞将）。</p>
+
+        <h3>2. 揭棋</h3>
+        <ul>
+          <li>开局：帅/将固定在本方九宫原位并且是明子；本方其余 15 枚棋子的<b>身份随机洗牌</b>，分别放在本方其余 15 个初始格上，全部<b>背面朝上（暗子）</b>。</li>
+          <li><b>双方都看不到暗子的身份</b>（包括自己的暗子）。</li>
+          <li>暗子的走法由它<b>所在初始格的位置角色</b>决定：在"车"位就走车步，在"马"位就走马步，在"炮"位就走炮步，在"兵"位就走兵步，在"士/象"位就走士步/象步。</li>
+          <li>暗子<b>一移动就翻开</b>，之后按它的真实身份行棋。</li>
+          <li>暗子被吃时先翻开、再移除，双方都看到它到底是什么。</li>
+          <li>将/帅是明子，因此将军、应将、绝杀（含困毙）与正常模式一致。</li>
+        </ul>
+
+        <h3>3. 全乱揭棋</h3>
+        <ul>
+          <li>开局：本方 <b>16 枚</b>棋子（<b>包括将/帅</b>）的身份全部随机洗牌，放到本方 16 个初始格上，全部背面朝上。</li>
+          <li>暗子走法同上：按所在初始格的位置角色走；移动即翻开，之后按真实身份走。</li>
+          <li>因为连将/帅在哪都不知道：<b>将/帅被吃 = 立即判负</b>；只有<b>已经翻开的</b>将/帅才会被将军、才受"不能送将"的约束；将/帅翻开后若被绝杀（无合法着法），同样判负。</li>
+        </ul>
+
+        <h3>4. 全明乱棋</h3>
+        <p>布局与全乱揭棋完全相同（本方 16 枚身份随机洗牌到本方 16 个初始格），但<b>开局即全部翻开</b>。完全按正常象棋规则行棋、将军、绝杀。</p>
+
+        <h3>5. 红/绿描边（安全吃子提示）</h3>
+        <p>某一枚棋子如果<b>能被对方吃掉、而且对方吃掉它之后不会被任何棋子反吃</b>（俗称"白吃"），就会显示描边：</p>
+        <ul>
+          <li><b class="c-red">红色描边</b>：这是<b>我方</b>的棋子，正被对方白吃，赶紧处理。</li>
+          <li><b class="c-green">绿色描边</b>：这是<b>对方</b>的棋子，我可以白吃它。</li>
+        </ul>
+
+        <h3>6. 胜负</h3>
+        <ul>
+          <li>吃掉对方将/帅（限暗将模式）→ 胜。</li>
+          <li>对方被绝杀（将军且无着可解）→ 胜。</li>
+          <li>对方被困毙（未被将军但无子可动）→ 胜。</li>
+          <li>对方认输 / 掉线超时 → 胜。</li>
+        </ul>
+
+        <h3>7. 操作</h3>
+        <ul>
+          <li>点击己方棋子选中，棋盘上会显示可走的点；点击目标点落子。</li>
+          <li>轮到自己才能走子；观战者只能看。</li>
+          <li>红方在下、黑方在上。</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 终局特效遮罩 ================= -->
+  <div id="mate-overlay" class="mate-overlay hidden">
+    <div class="shockwave sw1"></div>
+    <div class="shockwave sw2"></div>
+    <div class="mate-banner">
+      <div id="mate-text" class="mate-text">绝杀!</div>
+      <div id="mate-sub" class="mate-sub"></div>
+    </div>
+  </div>
+
+</main>
+
+<canvas id="fx-layer" class="fx-layer" aria-hidden="true"></canvas>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

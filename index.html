@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>中国象棋 · 联机对弈</title>
+<script>
+  // GitHub Pages 入口：仓库根目录被当作站点根时，把访问者送到真正的应用目录。
+  // 保留 ?room=XXXXXX 之类的查询参数。
+  (function () {
+    var q = location.search || '';
+    var h = location.hash || '';
+    location.replace('public/' + q + h);
+  })();
+</script>
+<noscript><meta http-equiv="refresh" content="0; url=public/" /></noscript>
+</head>
+<body style="margin:0;background:#0f131b;color:#e6ebf5;font-family:system-ui,'Microsoft YaHei',sans-serif">
+  <p style="padding:24px">正在进入棋局…如果没有自动跳转，请点击 <a style="color:#e0b25c" href="public/">这里</a>。</p>
+</body>
+</html>
