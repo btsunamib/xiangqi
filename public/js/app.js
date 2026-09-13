@@ -229,6 +229,8 @@ function updateResult(view) {
     kingcaptured: '擒王',
     resign: '认输',
     agreement: '和棋',
+    perpetual_check: '长将判负',
+    repetition: '三次重复',
   }[view.reason] || '终局';
   const winnerText = view.winner ? (SIDE_NAME[view.winner] + '胜') : '和棋';
   text.textContent = winnerText + ' · ' + reasonText;
@@ -281,6 +283,8 @@ function playEvents(events, view) {
       case 'checkmate':
       case 'stalemate':
       case 'kingcaptured':
+      case 'perpetual_check':
+      case 'repetition':
       case 'resign':
         showMate(ev.t, ev.winner);
         break;
@@ -301,6 +305,8 @@ function showMate(kind, winner) {
     checkmate: '绝杀!',
     stalemate: '困毙!',
     kingcaptured: '擒 王!',
+    perpetual_check: '长将判负!',
+    repetition: '和 棋',
     resign: '认 输',
   }[kind] || '终局';
 
@@ -313,10 +319,10 @@ function showMate(kind, winner) {
   }
   if (overlay) {
     overlay.classList.remove('hidden');
-    overlay.classList.toggle('dim', kind === 'resign' || kind === 'stalemate');
+    overlay.classList.toggle('dim', kind === 'resign' || kind === 'stalemate' || kind === 'repetition');
   }
 
-  if (kind === 'checkmate' || kind === 'kingcaptured') {
+  if (kind === 'checkmate' || kind === 'kingcaptured' || kind === 'perpetual_check') {
     FX.mateBurst(kind);
     AudioFX.mate();
   } else {

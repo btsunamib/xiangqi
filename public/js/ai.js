@@ -68,7 +68,9 @@ function orderMoves(state, moves) {
 
 function negamax(state, depth, alpha, beta, color, deadline) {
   if (state.over) {
-    return state.winner === color ? MATE - 1 : -(MATE - 1);
+    if (state.winner === color) return MATE - 1;
+    if (state.winner === null) return 0;   // 和棋（重复局面，双方都没连续将军）
+    return -(MATE - 1);
   }
   if (Date.now() > deadline) return evaluate(state, color);
   if (depth <= 0) return evaluate(state, color);

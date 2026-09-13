@@ -265,3 +265,77 @@ test('端到端：房间号不存在时报错；双方再来一局可重开', as
   assert.equal(restart.view.history.length, 0);
   assert.equal(restart.view.board.filter(Boolean).length, 32);
 });
+
+test('端到端：全乱揭棋房间阵营也是乱的（32 格铺满 + 红黑混置 + 暗子不泄露）', async (t) => {
+  const port = pickPort();
+  const srv = await startServer(port);
+  const clients = [];
+  t.after(() => {
+    for (const c of clients) c.close();
+    killServer(srv);
+  });
+
+  const A = await wsConnect(port);
+  clients.push(A);
+  await A.waitFor((m) => m.t === 'hello', 'A hello');
+  A.send({ t: 'create', mode: 'chaosJieqi', name: 'Alice' });
+  const roomA = await A.waitFor((m) => m.t === 'room', 'A room');
+  const code = roomA.room.code;
+
+  const B = await wsConnect(port);
+  clients.push(B);
+  await B.waitFor((m) => m.t === 'hello', 'B hello');
+  B.send({ t: 'join', code, name: 'Bob' });
+  await B.waitFor((m) => m.t === 'room' && m.you.seat === 'b', 'B seat');
+
+  A.send({ t: 'ready' });
+  B.send({ t: 'ready' });
+
+  const start = await A.waitFor(
+    (m) => m.t === 'state' && m.view && m.view.mode === 'chaosJieqi' &&
+      m.view.over === false && m.view.history.length === 0 &&
+      m.view.board.filter(Boolean).length === 32 &&
+      m.view.legal && Object.keys(m.view.legal).length > 0,
+    'chaosJieqi start state',
+  );
+
+  // 32 个初始格（黑底线/黑炮/黑兵 + 红底线/红炮/红兵）
+  const SQUARES = [];
+  for (let x = 0; x < 9; x++) SQUARES.push(x);
+  SQUARES.push(1 + 2 * 9, 7 + 2 * 9);
+  for (const x of [0, 2, 4, 6, 8]) SQUARES.push(x + 3 * 9);
+  for (let x = 0; x < 9; x++) SQUARES.push(x + 9 * 9);
+  SQUARES.push(1 + 7 * 9, 7 + 7 * 9);
+  for (const x of [0, 2, 4, 6, 8]) SQUARES.push(x + 6 * 9);
+  assert.equal(SQUARES.length, 32);
+
+  for (const sq of SQUARES) {
+    const p = start.view.board[sq];
+    assert.ok(p, '32 个初始格都应被占满, sq=' + sq);
+    assert.equal(p.revealed, false, '全乱揭棋开局全暗, sq=' + sq);
+    assert.equal(p.type, null, '暗子身份不得泄露, sq=' + sq);
+  }
+
+  const redHalf = SQUARES.filter((i) => i >= 45);
+  const blackHalf = SQUARES.filter((i) => i < 45);
+  const bOnRed = redHalf.filter((i) => start.view.board[i].color === 'b').length;
+  const rOnBlack = blackHalf.filter((i) => start.view.board[i].color === 'r').length;
+  assert.ok(bOnRed > 0, '红方半场应混有黑子（阵营乱）');
+  assert.ok(rOnBlack > 0, '黑方半场应混有红子（阵营乱）');
+
+  // 拿服务端下发的 legal 走一步，确认服务端接受新布局下的着法
+  const key = Object.keys(start.view.legal)[0];
+  const from = Number(key);
+  const to = start.view.legal[key][0];
+  A.send({ t: 'move', from, to });
+  const afterMove = await A.waitFor(
+    (m) => m.t === 'state' && m.view && m.view.ply === 1,
+    'state after chaosJieqi move',
+  );
+  assert.equal(afterMove.view.turn, 'b');
+  const alive = afterMove.view.board.filter(Boolean).length;
+  assert.ok(alive >= 31 && alive <= 32, '走子后棋子数应保持 31~32, 实际 ' + alive);
+
+  const leak = countLeaks(A.messages);
+  assert.equal(leak.leaks, 0, '全程不应泄露暗子身份: ' + JSON.stringify(leak.samples));
+});

@@ -15,15 +15,15 @@ export const MODE_INFO = {
   },
   jieqi: {
     key: 'jieqi', name: '揭棋', dark: true, chaos: false,
-    desc: '将帅明子固定原位，其余 15 枚身份随机暗置；暗子按所在位置角色走，走动即翻开。',
+    desc: '将帅明子固定原位，其余 15 枚身份随机暗置；暗子按所在位置角色走，走动即翻开。象可过河；翻开的士/将不再受九宫限制。',
   },
   chaosJieqi: {
     key: 'chaosJieqi', name: '全乱揭棋', dark: true, chaos: true,
-    desc: '含将帅在内 16 枚身份全部随机暗置；将帅被吃立即判负。',
+    desc: '红黑 32 枚棋子（含颜色）整体打乱铺满 32 个初始格，阵营也是乱的；将帅被吃立即判负。象可过河；翻开的士/将不再受九宫限制。',
   },
   chaosOpen: {
     key: 'chaosOpen', name: '全明乱棋', dark: false, chaos: true,
-    desc: '全乱布局，但开局即全部翻开，按标准象棋规则行棋。',
+    desc: '与全乱揭棋相同的乱阵营布局，但开局即全部翻开。象可过河。',
   },
 };
 
@@ -105,6 +105,29 @@ function randomSeed() {
 }
 
 // ---------------------------------------------------------------------------
+// 长将 / 重复局面
+//   同一局面（含走子方）第 3 次出现时：若被将一方正处于被将状态，
+//   说明对方在连续将军 -> 长将判负；否则判和棋。
+// ---------------------------------------------------------------------------
+
+const TYPE_CODE = { K: 0, A: 1, B: 2, N: 3, R: 4, C: 5, P: 6 };
+const REP_WINDOW = 40; // 只回看最近 40 个半回合，避免在 AI 搜索里做长字符串比较
+
+/** 局面指纹：走子方 + 每格棋子的颜色/真实身份/明暗。 */
+function positionHash(state) {
+  let h = state.turn === 'r' ? 0x811c9dc5 : 0x9e3779b9;
+  const b = state.board;
+  for (let i = 0; i < 90; i++) {
+    const p = b[i];
+    const v = p
+      ? ((p.color === 'r' ? 1 : 2) << 5) | ((TYPE_CODE[p.type] || 0) << 1) | (p.revealed ? 1 : 0)
+      : 0;
+    h = Math.imul(h ^ (v * 97 + i + 1), 16777619);
+  }
+  return h >>> 0;
+}
+
+// ---------------------------------------------------------------------------
 // 建局
 // ---------------------------------------------------------------------------
 
@@ -120,7 +143,14 @@ export function createGame(mode = 'normal', seed) {
   };
   let n = 0;
   const put = (i, color, type, revealed) => {
-    st.board[i] = { id: color + type + (n++), color, type, revealed };
+    const pos = xy(i);
+    st.board[i] = {
+      id: color + type + (n++), color, type, revealed,
+      // 暗子走一步被翻开时置 true，之后解除九宫限制
+      flipped: false,
+      // 乱棋里士/将被洗到九宫外时直接解除九宫限制，否则它一步都走不了
+      free: (type === 'A' || type === 'K') && !inPalace(color, pos.x, pos.y),
+    };
   };
 
   if (mode === 'normal') {
@@ -133,27 +163,45 @@ export function createGame(mode = 'normal', seed) {
       put(idx(7, cannonY), color, 'C', true);
       for (const x of [0, 2, 4, 6, 8]) put(idx(x, pawnY), color, 'P', true);
     }
+    st.repKeys = [positionHash(st)];
     return st;
   }
 
-  // 揭棋 / 全乱揭棋 / 全明乱棋：身份洗牌
   const rng = mulberry32(s);
-  for (const color of ['b', 'r']) {
-    const squares = startingSquares(color);
-    if (mode === 'jieqi') {
-      // 帅/将固定在九宫原位且为明子；其余 15 枚身份洗牌到其余 15 格
+
+  if (mode === 'jieqi') {
+    // 帅/将固定在九宫原位且为明子（所以它不"翻"，仍受九宫限制）；
+    // 其余 15 枚身份洗牌到其余 15 格。
+    for (const color of ['b', 'r']) {
+      const squares = startingSquares(color);
       const kingSq = squares.find((i) => roleOfSquare(i) === 'K');
       put(kingSq, color, 'K', true);
       const others = squares.filter((i) => i !== kingSq);
       const ids = shuffle(rng, ['R', 'R', 'N', 'N', 'B', 'B', 'A', 'A', 'C', 'C', 'P', 'P', 'P', 'P', 'P']);
       others.forEach((sq, k) => put(sq, color, ids[k], false));
-    } else {
-      // 全乱：含将帅在内 16 枚身份洗牌到 16 个初始格
-      const ids = shuffle(rng, ['R', 'R', 'N', 'N', 'B', 'B', 'A', 'A', 'C', 'C', 'P', 'P', 'P', 'P', 'P', 'K']);
-      const revealed = mode === 'chaosOpen';
-      squares.forEach((sq, k) => put(sq, color, ids[k], revealed));
     }
+    st.repKeys = [positionHash(st)];
+    return st;
   }
+
+  // 全乱揭棋 / 全明乱棋：红黑 32 枚棋子（含颜色）整体打乱，铺满 32 个初始格
+  // —— 阵营也是乱的：红方底线上完全可能站着黑子。
+  const squares = startingSquares('b').concat(startingSquares('r'));
+  const pool = [];
+  for (const color of ['b', 'r']) {
+    pool.push(color + 'R', color + 'R', color + 'N', color + 'N',
+              color + 'B', color + 'B', color + 'A', color + 'A',
+              color + 'C', color + 'C', color + 'P', color + 'P',
+              color + 'P', color + 'P', color + 'P', color + 'K');
+  }
+  const shuffled = shuffle(rng, pool);
+  const revealed = mode === 'chaosOpen';
+  squares.forEach((sq, k) => {
+    const code = shuffled[k];
+    put(sq, code[0], code[1], revealed);
+  });
+
+  st.repKeys = [positionHash(st)];
   return st;
 }
 
@@ -161,7 +209,10 @@ export function cloneState(state) {
   const board = new Array(90);
   for (let i = 0; i < 90; i++) {
     const p = state.board[i];
-    board[i] = p ? { id: p.id, color: p.color, type: p.type, revealed: p.revealed } : null;
+    board[i] = p ? {
+      id: p.id, color: p.color, type: p.type, revealed: p.revealed,
+      flipped: !!p.flipped, free: !!p.free,
+    } : null;
   }
   return {
     mode: state.mode,
@@ -172,6 +223,7 @@ export function cloneState(state) {
     over: state.over,
     winner: state.winner,
     reason: state.reason,
+    repKeys: state.repKeys ? state.repKeys.slice() : [],
     history: state.history.slice(),
     lastMove: state.lastMove ? { from: state.lastMove.from, to: state.lastMove.to } : null,
   };
@@ -205,6 +257,10 @@ function pseudoTargets(state, from) {
   const c = p.color;
   const x = from % 9;
   const y = (from / 9) | 0;
+  // 翻开过的子解除九宫限制；乱棋里被洗到九宫外的士/将同样解除（见 createGame 的 free）
+  const freeFromPalace = p.revealed && (p.flipped === true || p.free === true);
+  // 揭棋系列：象可以过河（仍走田字、仍塞象眼）
+  const elephantCrossRiver = state.mode !== 'normal';
   const at = (xx, yy) => (xx < 0 || xx > 8 || yy < 0 || yy > 9) ? undefined : board[yy * 9 + xx];
 
   switch (type) {
@@ -258,7 +314,7 @@ function pseudoTargets(state, from) {
         const dx = DIAG4[d][0], dy = DIAG4[d][1];
         const nx = x + dx * 2, ny = y + dy * 2;
         if (nx < 0 || nx > 8 || ny < 0 || ny > 9) continue;
-        if (!onOwnSide(c, ny)) continue;          // 象不过河
+        if (!elephantCrossRiver && !onOwnSide(c, ny)) continue; // 正常模式象不过河
         if (at(x + dx, y + dy) !== null) continue; // 塞象眼
         const q = at(nx, ny);
         if (q === null || q.color !== c) out.push(ny * 9 + nx);
@@ -268,7 +324,8 @@ function pseudoTargets(state, from) {
     case 'A': {
       for (let d = 0; d < 4; d++) {
         const nx = x + DIAG4[d][0], ny = y + DIAG4[d][1];
-        if (!inPalace(c, nx, ny)) continue;
+        if (nx < 0 || nx > 8 || ny < 0 || ny > 9) continue;
+        if (!freeFromPalace && !inPalace(c, nx, ny)) continue;
         const q = at(nx, ny);
         if (q === null || q.color !== c) out.push(ny * 9 + nx);
       }
@@ -277,7 +334,8 @@ function pseudoTargets(state, from) {
     case 'K': {
       for (let d = 0; d < 4; d++) {
         const nx = x + DIRS4[d][0], ny = y + DIRS4[d][1];
-        if (!inPalace(c, nx, ny)) continue;
+        if (nx < 0 || nx > 8 || ny < 0 || ny > 9) continue;
+        if (!freeFromPalace && !inPalace(c, nx, ny)) continue;
         const q = at(nx, ny);
         if (q === null || q.color !== c) out.push(ny * 9 + nx);
       }
@@ -421,6 +479,7 @@ function applyRaw(state, from, to) {
   ns.board[to] = p;
   if (wasDark) {
     p.revealed = true;
+    p.flipped = true;   // 本局被翻开的子 -> 之后解除九宫限制
     events.push({ t: 'reveal', index: to, color: p.color, type: p.type });
   }
 
@@ -441,10 +500,31 @@ function applyRaw(state, from, to) {
 function applyFull(state, from, to) {
   const { ns, events, mover, capturedKing } = applyRaw(state, from, to);
 
+  // 记录局面指纹，用于长将 / 重复局面判定
+  const h = positionHash(ns);
+// 手工构造的局面没有 repKeys：用当前局面做种，保证长将判定依然可用
+  const prevKeys = (state.repKeys && state.repKeys.length) ? state.repKeys : [positionHash(state)];
+  let repKeys = prevKeys.concat([h]);
+  if (repKeys.length > REP_WINDOW) repKeys = repKeys.slice(repKeys.length - REP_WINDOW);
+  ns.repKeys = repKeys;
+  let repCount = 0;
+  for (let k = 0; k < repKeys.length; k++) if (repKeys[k] === h) repCount++;
+
   if (capturedKing) {
     ns.over = true;
     ns.winner = mover;
     ns.reason = 'kingcaptured';
+  } else if (repCount >= 3) {
+    // 同一局面第 3 次出现。若此刻轮到的这一方正被将军，
+    // 说明对方在连续将军 -> 长将判负（将军方输）；否则判和棋。
+    ns.over = true;
+    if (inCheck(ns, ns.turn)) {
+      ns.winner = ns.turn;          // 被长将的一方获胜
+      ns.reason = 'perpetual_check';
+    } else {
+      ns.winner = null;             // 双方都没有连续将军 -> 和棋
+      ns.reason = 'repetition';
+    }
   } else {
     const ms = allMoves(ns);
     if (ms.length === 0) {
@@ -458,7 +538,7 @@ function applyFull(state, from, to) {
     events.push({
       t: ns.reason,
       winner: ns.winner,
-      loser: opposite(ns.winner),
+      loser: ns.winner ? opposite(ns.winner) : null,
     });
   } else if (inCheck(ns, ns.turn)) {
     events.push({ t: 'check', color: ns.turn });

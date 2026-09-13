@@ -8,6 +8,7 @@ import { P, ST, I, coords } from './_helpers.mjs';
 
 const IDS = ['R', 'R', 'N', 'N', 'B', 'B', 'A', 'A', 'C', 'C', 'P', 'P', 'P', 'P', 'P', 'K'];
 const NON_KING_IDS = IDS.filter((t) => t !== 'K');
+const ALL_IDS = IDS.concat(IDS); // 红黑各 16 枚，共 32 枚
 
 function countBy(state) {
   let dark = 0, shown = 0;
@@ -69,21 +70,36 @@ test('揭棋：所有暗子都停在本方初始格上', () => {
   }
 });
 
-test('全乱揭棋：32 枚全暗，含将/帅的身份被洗牌到本方 16 个初始格', () => {
+test('全乱揭棋：32 枚全暗，铺满 32 个初始格，身份多重集完整', () => {
   const g = createGame('chaosJieqi', 555);
   assert.deepEqual(countBy(g), { dark: 32, shown: 0 });
-  for (const color of ['r', 'b']) {
-    const squares = new Set(startingSquares(color));
-    const ids = [];
-    for (let i = 0; i < 90; i++) {
-      const p = g.board[i];
-      if (!p || p.color !== color) continue;
-      assert.ok(squares.has(i), '棋子不在本方初始格');
-      ids.push(p.type);
-    }
-    assert.equal(ids.length, 16);
-    assert.deepEqual(ids.slice().sort(), IDS.slice().sort(), '含将/帅的身份多重集必须完整');
+
+  const squares = startingSquares('b').concat(startingSquares('r'));
+  assert.equal(squares.length, 32);
+  for (const sq of squares) {
+    const p = g.board[sq];
+    assert.ok(p, '每个初始格都必须有子: ' + JSON.stringify(coords(sq)));
+    assert.equal(p.revealed, false, '全乱揭棋开局全暗');
   }
+  for (let i = 0; i < 90; i++) {
+    if (squares.includes(i)) continue;
+    assert.equal(g.board[i], null, '初始格之外不应有子: ' + JSON.stringify(coords(i)));
+  }
+
+  const ids = g.board.filter(Boolean).map((p) => p.type);
+  assert.deepEqual(ids.slice().sort(), ALL_IDS.slice().sort(), '32 枚身份多重集必须完整');
+});
+
+test('全乱揭棋：阵营也是乱的 —— 两方半场都会混入对方颜色的子', () => {
+  const seeds = [1, 2, 3, 4, 5, 6, 7, 8];
+  let mixed = 0;
+  for (const seed of seeds) {
+    const g = createGame('chaosJieqi', seed);
+    const redHalf = startingSquares('r').filter((i) => g.board[i] && g.board[i].color === 'b').length;
+    const blackHalf = startingSquares('b').filter((i) => g.board[i] && g.board[i].color === 'r').length;
+    if (redHalf > 0 && blackHalf > 0) mixed += 1;
+  }
+  assert.ok(mixed >= seeds.length - 1, '绝大多数 seed 下两侧半场都应混有对方颜色, mixed=' + mixed);
 });
 
 test('全明乱棋：布局与全乱揭棋一致，但全部翻开', () => {
@@ -115,7 +131,7 @@ test('相同 seed 布局完全可复现，不同 seed 布局不同', () => {
   }
 });
 
-test('暗子按所在初始格的"位置角色"走：兵位暗子只能前进一格', () => {
+test('暗子按所在初始格的"位置角色"走：兵位暗子只走兵步', () => {
   let checked = 0;
   for (const seed of [11, 22, 33, 44, 55]) {
     const g = createGame('chaosJieqi', seed);
@@ -123,11 +139,22 @@ test('暗子按所在初始格的"位置角色"走：兵位暗子只能前进一
       if (roleOfSquare(i) !== 'P') continue;
       const p = g.board[i];
       if (!p || p.revealed) continue;
-      if (p.color !== g.turn) continue;
-      const t = movesFrom(g, i);
-      assert.equal(t.length, 1, '兵位暗子应只能前进一格, square=' + JSON.stringify(coords(i)));
+      if (p.color !== g.turn) continue;   // 只看当前行棋方（红）
+      const from = coords(i);
       const fwd = p.color === 'r' ? -1 : 1;
-      assert.deepEqual(coords(t[0]), [i % 9, ((i / 9) | 0) + fwd]);
+      const ownSide = p.color === 'r' ? from[1] >= 5 : from[1] <= 4;
+      for (const to of movesFrom(g, i)) {
+        const c = coords(to);
+        const dx = c[0] - from[0];
+        const dy = c[1] - from[1];
+        if (dy === fwd) {
+          assert.equal(dx, 0, '前进只能走同一列: ' + JSON.stringify([from, c]));
+        } else {
+          assert.equal(ownSide, false, '未过河不应能横走: ' + JSON.stringify([from, c]));
+          assert.equal(dy, 0, '横走不能改变行: ' + JSON.stringify([from, c]));
+          assert.equal(Math.abs(dx), 1, '横走只能走一格: ' + JSON.stringify([from, c]));
+        }
+      }
       checked += 1;
     }
   }
