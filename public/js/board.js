@@ -129,6 +129,29 @@ function buildSvg() {
 }
 
 /**
+ * 纯函数：把屏幕上的点映射成格子索引（-1 = 没命中任何格子）。
+ * 单独抽出来是为了能在 node:test 里回归测试缩放计算。
+ * @param {number} clientX 屏幕 X
+ * @param {number} clientY 屏幕 Y
+ * @param {{left:number,top:number,k:number}} m 棋盘左上角与缩放比
+ */
+export function hitTest(clientX, clientY, m) {
+  const k = (m && m.k) ? m.k : 1;
+  const lx = (clientX - m.left) / k;   // 还原到未缩放的棋盘坐标
+  const ly = (clientY - m.top) / k;
+  const cx = Math.round((lx - MARGIN) / CELL);
+  const cy = Math.round((ly - MARGIN) / CELL);
+  if (cx < 0 || cx > 8 || cy < 0 || cy > 9) return -1;
+  const dx = lx - cellX(cx);
+  const dy = ly - cellY(cy);
+  // 触屏上保证至少约 22 个 CSS 像素的容错半径
+  const tol = Math.max(CELL * 0.55, 22 / k);
+  if (dx * dx + dy * dy > tol * tol) return -1;
+  // |0 归一化：浮点误差会让 Math.round 返回 -0（-0 === 0 为真，但规范化更干净）
+  return (cy * 9 + cx) | 0;
+}
+
+/**
  * @param {HTMLElement} host  容器（#board-host）
  * @param {{onMove?: (from:number,to:number)=>void}} opts
  */
@@ -139,6 +162,10 @@ export function createBoard(host, opts) {
   fit.className = 'board-fit';
   const scale = document.createElement('div');
   scale.className = 'board-scale';
+  // 必须给显式宽高：.board-scale 的子元素全是 absolute，否则它自身尺寸为 0，
+  // getBoundingClientRect().width 也就是 0，缩放比 k 会退化成 1（手机端点不中格子）。
+  scale.style.width = BOARD_W + 'px';
+  scale.style.height = BOARD_H + 'px';
   fit.appendChild(scale);
   host.appendChild(fit);
 
@@ -184,26 +211,30 @@ export function createBoard(host, opts) {
   }
 
   // ---------- 坐标换算 ----------
-  function toScreen(index) {
+  // .board-scale 的显示宽度 = BOARD_W * k，用它反推缩放比。
+  // 兜底：万一拿到的宽度为 0，就退回 .board-fit（它的宽高由 relayout 显式设置）。
+  function boardMetrics() {
     const r = scale.getBoundingClientRect();
-    const k = (r.width || BOARD_W) / BOARD_W;
+    let left = r.left;
+    let top = r.top;
+    let w = r.width;
+    if (!w) {
+      const fr = fit.getBoundingClientRect();
+      left = fr.left;
+      top = fr.top;
+      w = fr.width;
+    }
+    return { left: left, top: top, k: w ? w / BOARD_W : 1 };
+  }
+
+  function toScreen(index) {
+    const m = boardMetrics();
     const c = centerOf(index);
-    return { x: r.left + c.x * k, y: r.top + c.y * k };
+    return { x: m.left + c.x * m.k, y: m.top + c.y * m.k };
   }
 
   function indexFromPoint(clientX, clientY) {
-    const r = scale.getBoundingClientRect();
-    const k = (r.width || BOARD_W) / BOARD_W;
-    if (!k) return -1;
-    const lx = (clientX - r.left) / k;
-    const ly = (clientY - r.top) / k;
-    const cx = Math.round((lx - MARGIN) / CELL);
-    const cy = Math.round((ly - MARGIN) / CELL);
-    if (cx < 0 || cx > 8 || cy < 0 || cy > 9) return -1;
-    const dx = lx - cellX(cx);
-    const dy = ly - cellY(cy);
-    if (dx * dx + dy * dy > (CELL * 0.55) * (CELL * 0.55)) return -1;
-    return cy * 9 + cx;
+    return hitTest(clientX, clientY, boardMetrics());
   }
 
   // ---------- 棋子 ----------

@@ -224,7 +224,9 @@ input:focus{border-color:var(--gold);box-shadow:0 0 0 3px rgba(224,178,92,.14)}
 }
 .dot.cap{width:46px;height:46px;margin:-23px 0 0 -23px;background:transparent;
   border:3px solid rgba(230,60,40,.85);box-shadow:0 0 14px rgba(255,70,50,.55), inset 0 0 10px rgba(255,70,50,.35)}
-@keyframes dotIn{from{opacity:0;transform:scale(.4)}to{opacity:1;transform:scale(1)}}
+/* 注意：这里绝对不能动 transform —— .dot 的定位靠内联 transform，
+   CSS 动画优先级高于内联样式，会让可走点先闪现在棋盘左上角。 */
+@keyframes dotIn{from{opacity:0}to{opacity:1}}
 
 /* 红/绿 呼吸描边（不遮挡文字：只用外环 + 外发光） */
 .piece.hl-red{
