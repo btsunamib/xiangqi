@@ -21,7 +21,8 @@ const GLYPH = {
   b: { K: '将', A: '士', B: '象', N: '马', R: '车', C: '炮', P: '卒' },
 };
 // 暗子背面：只体现颜色（颜色本就公开），不体现任何身份
-const DARK_GLYPH = { r: '汉', b: '楚' };
+// 暗子背面统一纹样：翻开之前连阵营都不能从背面看出来
+const DARK_GLYPH = '棋';
 
 const cellX = (x) => MARGIN + x * CELL;
 const cellY = (y) => MARGIN + y * CELL;
@@ -263,13 +264,15 @@ export function createBoard(host, opts) {
     node.style.setProperty('--tf', t);
     node.style.transform = t;
 
-    // 明暗样式（暗子只用"楚/汉"体现颜色，不体现身份）
+    // 明暗样式：暗子连阵营都不体现（viewFor 对暗子下发 color:null），统一背面
     const dark = !p.revealed;
-    node.classList.toggle('r', p.color === 'r');
-    node.classList.toggle('b', p.color === 'b');
+    node.classList.toggle('r', !dark && p.color === 'r');
+    node.classList.toggle('b', !dark && p.color === 'b');
     node.classList.toggle('dark', dark);
     const glyphEl = node.firstChild;
-    const text = dark ? DARK_GLYPH[p.color] : (GLYPH[p.color][p.type] || '?');
+    const text = dark
+      ? DARK_GLYPH
+      : ((GLYPH[p.color] && GLYPH[p.color][p.type]) || '?');
     if (glyphEl.textContent !== text) glyphEl.textContent = text;
 
     // 刚翻开：做一个翻牌脉冲
@@ -397,8 +400,9 @@ export function createBoard(host, opts) {
       onMove(from, i);
       return;
     }
-    const p = view.board[i];
-    if (p && p.color === state.myColor) {
+    // 选子判据改成"这一步有没有合法着法"：暗子不公开阵营（color 为 null），
+    // 而 view.legal 只会为当前行棋方自己的子填充，正好等价于"这是我的子"。
+    if (view.legal && view.legal[i]) {
       if (state.selected === i) clearSelection();
       else select(i);
       return;

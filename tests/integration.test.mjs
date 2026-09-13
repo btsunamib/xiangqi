@@ -266,7 +266,7 @@ test('端到端：房间号不存在时报错；双方再来一局可重开', as
   assert.equal(restart.view.board.filter(Boolean).length, 32);
 });
 
-test('端到端：全乱揭棋房间阵营也是乱的（32 格铺满 + 红黑混置 + 暗子不泄露）', async (t) => {
+test('端到端：全乱揭棋 32 格铺满且全暗，阵营与身份都不泄露', async (t) => {
   const port = pickPort();
   const srv = await startServer(port);
   const clients = [];
@@ -314,14 +314,19 @@ test('端到端：全乱揭棋房间阵营也是乱的（32 格铺满 + 红黑�
     assert.ok(p, '32 个初始格都应被占满, sq=' + sq);
     assert.equal(p.revealed, false, '全乱揭棋开局全暗, sq=' + sq);
     assert.equal(p.type, null, '暗子身份不得泄露, sq=' + sq);
+    assert.equal(p.color, null, '暗子翻开前连阵营都不得泄露, sq=' + sq);
   }
 
-  const redHalf = SQUARES.filter((i) => i >= 45);
-  const blackHalf = SQUARES.filter((i) => i < 45);
-  const bOnRed = redHalf.filter((i) => start.view.board[i].color === 'b').length;
-  const rOnBlack = blackHalf.filter((i) => start.view.board[i].color === 'r').length;
-  assert.ok(bOnRed > 0, '红方半场应混有黑子（阵营乱）');
-  assert.ok(rOnBlack > 0, '黑方半场应混有红子（阵营乱）');
+  // 阵营确实混置由引擎层保证（tests/modes.test.mjs 直接查 createGame 的真实颜色）。
+  // 协议层要断言的是相反的性质：整盘暗子的阵营一个都不能被公开。
+  assert.equal(
+    start.view.board.filter((p) => p && p.color !== null).length, 0,
+    '开局不应有任何棋子的阵营被公开',
+  );
+  assert.equal(
+    start.view.board.filter((p) => p && p.revealed && p.color === null).length, 0,
+    '已翻开的子必须带颜色',
+  );
 
   // 拿服务端下发的 legal 走一步，确认服务端接受新布局下的着法
   const key = Object.keys(start.view.legal)[0];

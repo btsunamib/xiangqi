@@ -6,7 +6,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  createGame, movesFrom, makeMove, inCheck, viewFor,
+  createGame, movesFrom, makeMove, inCheck, viewFor, mixedCamps,
 } from '../shared/engine.js';
 import { P, ST, I, coords } from './_helpers.mjs';
 
@@ -124,38 +124,91 @@ test('每次开局都会初始化重复局面记录', () => {
 // 象过河
 // ---------------------------------------------------------------------------
 
-test('象过河：正常模式不过河，揭棋系列可以过河（仍走田字、仍塞象眼）', () => {
-  const mk = (mode) => STM(mode, [
+test('象过河：暗象不能过河，翻开的象才能过河（仍走田字）', () => {
+  // 把红象放到【黑方的象位】(2,0)：不过河就一步都走不了，最严格地验证语义
+  const mk = (mode, opts) => {
+    const s = STM(mode, [
+      [4, 9, P('r', 'K')],
+      [3, 0, P('b', 'K')],
+      [2, 0, P('r', 'B')],
+    ], 'r');
+    const p = s.board[I(2, 0)];
+    p.revealed = !!opts.revealed;
+    p.flipped = !!opts.flipped;
+    p.free = !!opts.free;
+    return s;
+  };
+
+  // 正常模式：就算硬标成"已翻开"也不放行
+  assert.deepEqual(
+    movesFrom(mk('normal', { revealed: true, flipped: true, free: true }), I(2, 0)),
+    [], '正常模式的象永远不能过河',
+  );
+
+  // 揭棋：暗子（按所在格的位置角色走）不能过河
+  assert.deepEqual(
+    movesFrom(mk('jieqi', { revealed: false }), I(2, 0)),
+    [], '暗象不能过河，应无着可走',
+  );
+
+  // 揭棋：翻开后可以过河，且仍然只走田字
+  const open = movesFrom(mk('jieqi', { revealed: true, flipped: true }), I(2, 0)).map(coords).sort();
+  assert.deepEqual(open, [[0, 2], [4, 2]], '翻开的象应能过河');
+});
+
+test('象过河：全明乱棋（开局即明子 + free）可以过河', () => {
+  const s = STM('chaosOpen', [
     [4, 9, P('r', 'K')],
     [3, 0, P('b', 'K')],
-    [2, 5, P('r', 'B')],
+    [2, 0, P('r', 'B')],
   ], 'r');
+  const p = s.board[I(2, 0)];
+  p.revealed = true;
+  p.free = true;   // createGame 对揭棋系列的象都会打上这个标记
+  assert.deepEqual(movesFrom(s, I(2, 0)).map(coords).sort(), [[0, 2], [4, 2]]);
+});
 
-  const normal = movesFrom(mk('normal'), I(2, 5)).map(coords);
-  assert.ok(normal.length > 0, '正常模式象应能走');
-  assert.ok(normal.every((c) => c[1] >= 5), '正常模式象不能过河: ' + JSON.stringify(normal));
-
+test('象过河：createGame 给揭棋系列的象打了 free，正常模式不打', () => {
   for (const mode of ['jieqi', 'chaosJieqi', 'chaosOpen']) {
-    const ts = movesFrom(mk(mode), I(2, 5)).map(coords);
-    assert.ok(ts.some((c) => c[1] < 5), mode + ' 里象应能过河: ' + JSON.stringify(ts));
-    // 仍然只走田字
-    assert.ok(
-      ts.every(([x, y]) => Math.abs(x - 2) === 2 && Math.abs(y - 5) === 2),
-      mode + ' 象仍然只走田字: ' + JSON.stringify(ts),
-    );
+    const g = createGame(mode, 42);
+    let n = 0;
+    for (let i = 0; i < 90; i++) {
+      const p = g.board[i];
+      if (p && p.type === 'B') {
+        n += 1;
+        assert.equal(p.free, true, mode + ' 的象应带 free');
+      }
+    }
+    assert.equal(n, 4, mode + ' 应有 4 只象');
+  }
+  const g = createGame('normal', 42);
+  for (let i = 0; i < 90; i++) {
+    const p = g.board[i];
+    if (p && p.type === 'B') assert.equal(p.free, false, '正常模式的象不该带 free');
   }
 });
 
 test('象过河：塞象眼依然生效', () => {
-  const s = STM('jieqi', [
-    [4, 9, P('r', 'K')],
-    [3, 0, P('b', 'K')],
-    [2, 5, P('r', 'B')],
-    [1, 4, P('b', 'P')], // 堵住通往 (0,3) 的象眼
-  ], 'r');
-  const ts = movesFrom(s, I(2, 5)).map(coords);
-  assert.ok(!ts.some(([x, y]) => x === 0 && y === 3), '象眼被塞就不该能走 (0,3)');
-  assert.ok(ts.some(([x, y]) => x === 0 && y === 7), '未被塞的方向仍可走');
+  const mk = (blocked) => {
+    const list = [
+      [4, 9, P('r', 'K')],
+      [3, 0, P('b', 'K')],
+      [2, 5, P('r', 'B')],
+    ];
+    if (blocked) list.push([1, 4, P('b', 'P')]); // 堵住通往 (0,3) 的象眼
+    const s = STM('jieqi', list, 'r');
+    const p = s.board[I(2, 5)];
+    p.revealed = true;
+    p.flipped = true; // 翻开后才允许过河，这样 (0,3) 才在候选里
+    return s;
+  };
+
+  const free = movesFrom(mk(false), I(2, 5)).map(coords);
+  assert.ok(free.some(([x, y]) => x === 0 && y === 3), '没堵象眼时应能走 (0,3): ' + JSON.stringify(free));
+
+  const blocked = movesFrom(mk(true), I(2, 5)).map(coords);
+  assert.ok(!blocked.some(([x, y]) => x === 0 && y === 3), '象眼被塞就不该能走 (0,3)');
+  assert.ok(blocked.some(([x, y]) => x === 0 && y === 7), '未被塞的方向仍可走');
 });
 
 // ---------------------------------------------------------------------------
@@ -272,4 +325,62 @@ test('viewFor 不会把 flipped / free 等内部字段下发给客户端', () =>
       assert.equal('free' in p, false, mode);
     }
   }
+});
+
+// ---------------------------------------------------------------------------
+// 翻开之前不知道阵营
+// ---------------------------------------------------------------------------
+
+test('藏阵营：暗子在 viewFor 里 color 为 null，翻开后才有颜色', () => {
+  for (const mode of ['jieqi', 'chaosJieqi', 'chaosOpen']) {
+    const g = createGame(mode, 2024);
+    const v = viewFor(g, 'r');
+    for (let i = 0; i < 90; i++) {
+      const p = g.board[i];
+      if (!p) continue;
+      const vp = v.board[i];
+      if (p.revealed) {
+        assert.equal(vp.color, p.color, mode + ' 明子应有颜色');
+        assert.equal(vp.type, p.type, mode + ' 明子应有身份');
+      } else {
+        assert.equal(vp.color, null, mode + ' 暗子不得泄露阵营');
+        assert.equal(vp.type, null, mode + ' 暗子不得泄露身份');
+      }
+    }
+  }
+});
+
+test('藏阵营：走一步翻开的子会开始带颜色', () => {
+  const g = createGame('jieqi', 808);
+  const before = viewFor(g, 'r');
+  const dark = [];
+  for (let i = 0; i < 90; i++) if (g.board[i] && !g.board[i].revealed) dark.push(i);
+  assert.ok(dark.length > 0);
+  for (const i of dark) assert.equal(before.board[i].color, null);
+
+  // 红方走任意一步合法着法，被移动的暗子必然翻开
+  const from = Number(Object.keys(before.legal)[0]);
+  const to = before.legal[from][0];
+  const res = makeMove(g, from, to);
+  assert.equal(res.ok, true, 'error=' + res.error);
+  const after = viewFor(res.state, 'r');
+  assert.equal(res.state.board[to].revealed, true, '移动即翻开');
+  assert.equal(after.board[to].color, res.state.board[to].color, '翻开后应公开颜色');
+  assert.ok(after.board[to].color === 'r' || after.board[to].color === 'b');
+});
+
+test('藏阵营：全乱揭棋里红/绿描边与 threats 都不标注暗子', () => {
+  const g = createGame('chaosJieqi', 555);
+  const v = viewFor(g, 'r');
+  for (const i of (v.red || [])) assert.equal(g.board[i].revealed, true, 'red 里不该有暗子');
+  for (const i of (v.green || [])) assert.equal(g.board[i].revealed, true, 'green 里不该有暗子');
+  for (const i of (v.threats.r || [])) assert.equal(g.board[i].revealed, true, 'threats.r 里不该有暗子');
+  for (const i of (v.threats.b || [])) assert.equal(g.board[i].revealed, true, 'threats.b 里不该有暗子');
+});
+
+test('mixedCamps：只有全乱揭棋 / 全明乱棋算阵营混置', () => {
+  assert.equal(mixedCamps('normal'), false);
+  assert.equal(mixedCamps('jieqi'), false);
+  assert.equal(mixedCamps('chaosJieqi'), true);
+  assert.equal(mixedCamps('chaosOpen'), true);
 });

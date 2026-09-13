@@ -15,17 +15,22 @@ export const MODE_INFO = {
   },
   jieqi: {
     key: 'jieqi', name: '揭棋', dark: true, chaos: false,
-    desc: '将帅明子固定原位，其余 15 枚身份随机暗置；暗子按所在位置角色走，走动即翻开。象可过河；翻开的士/将不再受九宫限制。',
+    desc: '将帅明子固定原位，其余 15 枚身份随机暗置；暗子按所在位置角色走，走动即翻开，翻开前连阵营都不公开。翻开的象可过河；翻开的士/将不再受九宫限制。',
   },
   chaosJieqi: {
     key: 'chaosJieqi', name: '全乱揭棋', dark: true, chaos: true,
-    desc: '红黑 32 枚棋子（含颜色）整体打乱铺满 32 个初始格，阵营也是乱的；将帅被吃立即判负。象可过河；翻开的士/将不再受九宫限制。',
+    desc: '红黑 32 枚棋子（含颜色）整体打乱铺满 32 个初始格，阵营也是乱的；翻开前连颜色都不公开。将帅被吃立即判负。翻开的象可过河；翻开的士/将不再受九宫限制。',
   },
   chaosOpen: {
     key: 'chaosOpen', name: '全明乱棋', dark: false, chaos: true,
     desc: '与全乱揭棋相同的乱阵营布局，但开局即全部翻开。象可过河。',
   },
 };
+
+/** 该模式是否"红黑混置"：此时棋子颜色本身就是隐藏信息，翻开前不得公开。 */
+export function mixedCamps(mode) {
+  return mode === 'chaosJieqi' || mode === 'chaosOpen';
+}
 
 // 汉字字形（前端可直接使用）
 export const PIECE_GLYPH = {
@@ -146,10 +151,14 @@ export function createGame(mode = 'normal', seed) {
     const pos = xy(i);
     st.board[i] = {
       id: color + type + (n++), color, type, revealed,
-      // 暗子走一步被翻开时置 true，之后解除九宫限制
+      // 暗子走一步被翻开时置 true，之后解除位置限制
       flipped: false,
-      // 乱棋里士/将被洗到九宫外时直接解除九宫限制，否则它一步都走不了
-      free: (type === 'A' || type === 'K') && !inPalace(color, pos.x, pos.y),
+      // 位置限制豁免（只在【已经翻开】后生效，见 pseudoTargets 的 unrestrained）：
+      //  - 士/将被洗到九宫外 -> 不豁免就一步都走不了
+      //  - 揭棋系列里的象   -> 翻出来后可以过河
+      free: (type === 'A' || type === 'K')
+        ? !inPalace(color, pos.x, pos.y)
+        : (type === 'B' && mode !== 'normal'),
     };
   };
 
@@ -257,10 +266,13 @@ function pseudoTargets(state, from) {
   const c = p.color;
   const x = from % 9;
   const y = (from / 9) | 0;
-  // 翻开过的子解除九宫限制；乱棋里被洗到九宫外的士/将同样解除（见 createGame 的 free）
-  const freeFromPalace = p.revealed && (p.flipped === true || p.free === true);
-  // 揭棋系列：象可以过河（仍走田字、仍塞象眼）
-  const elephantCrossRiver = state.mode !== 'normal';
+  // 位置限制豁免只对【已经翻开】的子生效：
+  //  - flipped：本局由暗子走一步翻开的
+  //  - free   ：开局就在"非法区域"的（乱棋里九宫外的士/将、揭棋系列里的象）
+  // 暗子一律按所在初始格的位置角色走，不豁免 —— 所以暗象不能过河。
+  const unrestrained = p.revealed && (p.flipped === true || p.free === true);
+  // 象过河再额外要求"这局是揭棋系列"：走子层也守住，不依赖 createGame 有没有打对标记。
+  const elephantFree = unrestrained && state.mode !== 'normal';
   const at = (xx, yy) => (xx < 0 || xx > 8 || yy < 0 || yy > 9) ? undefined : board[yy * 9 + xx];
 
   switch (type) {
@@ -314,7 +326,7 @@ function pseudoTargets(state, from) {
         const dx = DIAG4[d][0], dy = DIAG4[d][1];
         const nx = x + dx * 2, ny = y + dy * 2;
         if (nx < 0 || nx > 8 || ny < 0 || ny > 9) continue;
-        if (!elephantCrossRiver && !onOwnSide(c, ny)) continue; // 正常模式象不过河
+        if (!elephantFree && !onOwnSide(c, ny)) continue; // 象不过河（翻出来后解除）
         if (at(x + dx, y + dy) !== null) continue; // 塞象眼
         const q = at(nx, ny);
         if (q === null || q.color !== c) out.push(ny * 9 + nx);
@@ -325,7 +337,7 @@ function pseudoTargets(state, from) {
       for (let d = 0; d < 4; d++) {
         const nx = x + DIAG4[d][0], ny = y + DIAG4[d][1];
         if (nx < 0 || nx > 8 || ny < 0 || ny > 9) continue;
-        if (!freeFromPalace && !inPalace(c, nx, ny)) continue;
+        if (!unrestrained && !inPalace(c, nx, ny)) continue;
         const q = at(nx, ny);
         if (q === null || q.color !== c) out.push(ny * 9 + nx);
       }
@@ -335,7 +347,7 @@ function pseudoTargets(state, from) {
       for (let d = 0; d < 4; d++) {
         const nx = x + DIRS4[d][0], ny = y + DIRS4[d][1];
         if (nx < 0 || nx > 8 || ny < 0 || ny > 9) continue;
-        if (!freeFromPalace && !inPalace(c, nx, ny)) continue;
+        if (!unrestrained && !inPalace(c, nx, ny)) continue;
         const q = at(nx, ny);
         if (q === null || q.color !== c) out.push(ny * 9 + nx);
       }
@@ -664,7 +676,8 @@ export function viewFor(state, viewer) {
     board[i] = {
       i,
       id: p.id,
-      color: p.color,
+      // 暗子在翻开之前连阵营都不公开（乱棋里红黑混置，颜色本身就是关键信息）
+      color: p.revealed ? p.color : null,
       type: p.revealed ? p.type : null, // 暗子对任何人都不暴露身份
       revealed: p.revealed,
       role: p.revealed ? null : roleOfSquare(i), // 公开信息：该初始格的角色
@@ -673,7 +686,12 @@ export function viewFor(state, viewer) {
 
   const hl = highlights(state);
   const owner = state.over ? null : opposite(state.turn);
-  const targets = owner ? (hl[owner] || []) : [];
+  // 阵营混置的模式里，暗子的颜色是隐藏信息：用红/绿描边标出它等于泄露阵营，
+  // 所以这类模式只标注已经翻开的子。（揭棋里暗子的阵营由所处半场即可看出，不算泄露。）
+  const keep = mixedCamps(state.mode)
+    ? function (list) { return list.filter(function (i) { return state.board[i] && state.board[i].revealed; }); }
+    : function (list) { return list; };
+  const targets = owner ? keep(hl[owner] || []) : [];
 
   let legal = {};
   if (!state.over && viewer && (viewer === 'r' || viewer === 'b') && viewer === state.turn) {
@@ -699,7 +717,7 @@ export function viewFor(state, viewer) {
     // 同一批"可被白吃"的棋子：自己看到红色（危险），对方看到绿色（机会）
     red: viewer && viewer === owner ? targets.slice() : [],
     green: !viewer || viewer === state.turn ? targets.slice() : [],
-    threats: { r: (hl.r || []).slice(), b: (hl.b || []).slice() },
+    threats: { r: keep(hl.r || []).slice(), b: keep(hl.b || []).slice() },
     lastMove: state.lastMove ? { from: state.lastMove.from, to: state.lastMove.to } : null,
     history: state.history.map((h) => ({
       n: h.n, color: h.color, from: h.from, to: h.to,

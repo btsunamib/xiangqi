@@ -40,9 +40,16 @@ export function localView(ctx) {
   // 本地模式显式调用 highlights()，按 viewer 相对映射红/绿
   try {
     const hl = engine.highlights(ctx.state);
-    view.red = viewer ? (hl[viewer] || []).slice() : [];
-    view.green = viewer ? (hl[other(viewer)] || []).slice() : [];
-    view.threats = { r: (hl.r || []).slice(), b: (hl.b || []).slice() };
+    // 阵营混置的模式里暗子的颜色是隐藏信息，红/绿描边会泄露阵营 -> 只标注已翻开的子
+    const mixed = typeof engine.mixedCamps === 'function' ? engine.mixedCamps(ctx.mode) : false;
+    const keep = mixed
+      ? function (list) {
+          return list.filter(function (i) { return ctx.state.board[i] && ctx.state.board[i].revealed; });
+        }
+      : function (list) { return list; };
+    view.red = viewer ? keep(hl[viewer] || []).slice() : [];
+    view.green = viewer ? keep(hl[other(viewer)] || []).slice() : [];
+    view.threats = { r: keep(hl.r || []).slice(), b: keep(hl.b || []).slice() };
   } catch (e) {
     view.red = view.red || [];
     view.green = view.green || [];
